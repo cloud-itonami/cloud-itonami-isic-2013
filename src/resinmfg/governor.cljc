@@ -110,7 +110,44 @@
                                        truth from the batch's own
                                        permanent fields, never a
                                        self-reported weight claim.
-    9. Invalid polymer-grade       -- for `:log-production-batch`, if
+    9. Tensile-test load
+       independently out of
+       tolerance                     -- for `:coordinate-shipment`
+                                       (ADR-2607999900): INDEPENDENTLY
+                                       recompute, FRESH every call,
+                                       whether the batch's own recorded
+                                       `:specimen-mass-kg` (a compounded
+                                       resin/rubber dogbone/dumbbell
+                                       test specimen molded/cut alongside
+                                       this batch, ASTM D638/D412-style)
+                                       yields a REAL `physics-2d`-
+                                       simulated peak tensile load
+                                       (`resinmfg.robotics/run-tensile-
+                                       test`, a genuine time-stepped
+                                       rigid-body simulation) below the
+                                       real disclosed minimum required
+                                       tensile load (`resinmfg.robotics/
+                                       simulation-out-of-tolerance?`) --
+                                       never trusts any self-reported
+                                       claim. An unrelated QA domain
+                                       (mechanical tensile-load
+                                       qualification) to checks 10/11
+                                       below (which validate the
+                                       batch's own SELF-REPORTED
+                                       polymer-grade/off-spec-rate
+                                       intake-patch fields by closed-set
+                                       membership/plausibility bound
+                                       alone), folded into its OWN HARD
+                                       check, ADDITIONAL to every
+                                       existing check, never replacing
+                                       any of them. A batch with no
+                                       `:specimen-mass-kg` on file (no
+                                       tensile-test specimen molded/
+                                       tested yet) never triggers this
+                                       check -- missing telemetry is
+                                       never silently treated as a
+                                       violation.
+   10. Invalid polymer-grade       -- for `:log-production-batch`, if
                                        the patch declares a
                                        `:polymer-grade` outside the
                                        closed known set
@@ -118,7 +155,7 @@
                                        grade-valid?`), the batch record
                                        is rejected rather than let a
                                        fabricated polymer grade through.
-   10. Invalid off-spec-rate       -- for `:log-production-batch`, if
+   11. Invalid off-spec-rate       -- for `:log-production-batch`, if
                                        the patch declares an
                                        `:off-spec-rate-percent` that is
                                        not a physically plausible
@@ -128,7 +165,7 @@
                                        is rejected rather than let
                                        fabricated/sensor-error data
                                        through.
-   11. Confidence floor / high-
+   12. Confidence floor / high-
        stakes gate                  -- LLM confidence below threshold,
                                        OR the proposal's own `:stake` is
                                        in `high-stakes`
@@ -138,6 +175,7 @@
                                        plant supervisor. SOFT: the
                                        human may approve."
   (:require [resinmfg.registry :as registry]
+            [resinmfg.robotics :as robotics]
             [resinmfg.store :as store]))
 
 (def confidence-floor 0.6)
@@ -258,6 +296,35 @@
                        "kg)を、既存出荷実績(" (:shipped-weight-kg b 0.0)
                        "kg)+今回申請(" weight-kg "kg)が超過")}]))))
 
+(defn- tensile-test-out-of-tolerance-violations
+  "For `:coordinate-shipment` (ADR-2607999900): INDEPENDENTLY recompute
+  -- FRESH, every call, never a previously stored/self-reported value
+  -- whether the batch's own recorded `:specimen-mass-kg` (a compounded
+  resin/rubber dogbone/dumbbell test specimen molded/cut alongside this
+  batch, ASTM D638/D412-style test-specimen practice) yields a REAL
+  `physics-2d`-simulated peak tensile load (`resinmfg.robotics/run-
+  tensile-test`, a genuine time-stepped rigid-body simulation) below the
+  real disclosed minimum required tensile load (`resinmfg.robotics/
+  simulation-out-of-tolerance?`) -- never trusts any self-reported claim
+  for the batch's own mechanical-property qualification. ADDITIONAL to
+  every existing check, never replacing any of them (in particular
+  `invalid-polymer-grade-violations`/`invalid-off-spec-rate-violations`,
+  which validate the batch's own SELF-REPORTED intake-patch fields by
+  closed-set membership/plausibility bound alone -- this check is the
+  first ground-truth PHYSICS-derived mechanical-property check this
+  actor performs). A batch with no `:specimen-mass-kg` on file (no
+  tensile-test specimen molded/tested yet) never triggers this check --
+  missing telemetry is never silently treated as a violation, see
+  `resinmfg.robotics` ns docstring."
+  [{:keys [op]} proposal st]
+  (when (= op :coordinate-shipment)
+    (let [batch-id (:batch-id (:value proposal))
+          b (and batch-id (store/batch st batch-id))]
+      (when (and b (robotics/simulation-out-of-tolerance? b))
+        [{:rule :tensile-test-out-of-tolerance
+          :detail (str batch-id " の実測引張荷重が独立再検証で許容下限("
+                       robotics/min-tensile-load-n "N)を下回る")}]))))
+
 (defn- invalid-polymer-grade-violations
   "For `:log-production-batch`, if the patch declares a
   `:polymer-grade` outside the closed known set, reject rather than
@@ -294,6 +361,7 @@
                            (already-scheduled-violations request st)
                            (batch-not-verified-violations request proposal st)
                            (shipment-weight-exceeded-violations request proposal st)
+                           (tensile-test-out-of-tolerance-violations request proposal st)
                            (invalid-polymer-grade-violations request proposal)
                            (invalid-off-spec-rate-violations request proposal)))
         conf (:confidence proposal 0.0)
