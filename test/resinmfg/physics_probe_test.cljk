@@ -1,0 +1,33 @@
+(ns resinmfg.physics-probe-test
+  "The probe is the bot's only source of \"measured\"; these pin that it
+  measures (every run numeric, count = expected), that the numbers come
+  from the simulation (the derived boundary really straddles the floor),
+  and that a changed solver would show."
+  (:require [clojure.test :refer [deftest is testing]]
+            [resinmfg.physics-probe :as probe]
+            [resinmfg.robotics :as robotics]))
+
+(deftest probe-measures-every-run
+  (let [p (probe/probe)]
+    (is (= "itonami.physical-ai.probe.v1" (:physics-probe/schema p)))
+    (is (pos? (:count p)))
+    (is (= (:count p) (:expected p) (count (:runs p))))
+    (testing "every run carries a numeric load and tick count from the trajectory"
+      (doseq [r (:runs p)]
+        (is (number? (get-in r [:quantities :sim-tensile-load-n])))
+        (is (pos? (get-in r [:quantities :ticks])))))))
+
+(deftest load-rises-with-mass-across-the-sweep
+  (let [loads (map #(get-in % [:quantities :sim-tensile-load-n]) (:runs (probe/probe)))]
+    (is (apply < loads))))
+
+(deftest derived-boundary-straddles-the-floor
+  (let [m (probe/min-passing-mass-kg)
+        load (fn [kg] (:sim-tensile-load-n (robotics/tensile-test-telemetry-for {:specimen-mass-kg kg})))]
+    (is (number? m))
+    (testing "at the boundary the load reaches the floor; 1% lighter it does not"
+      (is (>= (load m) robotics/min-tensile-load-n))
+      (is (< (load (* 0.99 m)) robotics/min-tensile-load-n)))))
+
+(deftest bracket-that-does-not-straddle-answers-nil
+  (is (nil? (probe/min-passing-mass-kg 5.0 10.0 10))))
