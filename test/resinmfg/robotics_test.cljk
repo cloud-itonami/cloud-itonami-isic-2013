@@ -12,7 +12,7 @@
   `off-spec-rate-valid?` (the pre-existing self-reported checks) are
   untouched, and a batch with no `:specimen-mass-kg` on file never trips
   the new check."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [kotoba.test :refer [deftest is testing]]
             [resinmfg.robotics :as robotics]))
 
 (defn- abs* [x] (if (neg? x) (- x) x))
